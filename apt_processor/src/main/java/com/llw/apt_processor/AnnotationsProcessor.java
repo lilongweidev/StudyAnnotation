@@ -3,7 +3,6 @@ package com.llw.apt_processor;
 import com.google.auto.service.AutoService;
 import com.llw.apt_annotation.BindView;
 
-import java.io.IOException;
 import java.io.Writer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -16,6 +15,7 @@ import java.util.Set;
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Filer;
 import javax.annotation.processing.ProcessingEnvironment;
+import javax.annotation.processing.Processor;
 import javax.annotation.processing.RoundEnvironment;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
@@ -24,22 +24,18 @@ import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeMirror;
 import javax.tools.JavaFileObject;
 
-@AutoService(Process.class)
-public class AnnotationProcessor extends AbstractProcessor {
+/**
+ * 注解处理器，用来生成代码的
+ * 使用前需要注册
+ */
+@AutoService(Processor.class)
+public class AnnotationsProcessor extends AbstractProcessor {
 
-    private Filer mFiler;
-
-    /**
-     * 注解处理器初始化
-     */
-    @Override
-    public synchronized void init(ProcessingEnvironment processingEnv) {
-        super.init(processingEnv);
-        mFiler = processingEnv.getFiler();
-    }
+    // 定义用来生成APT目录下面的文件的对象（例如：MainActivity_ViewBinding）
+    Filer filer;
 
     /**
-     * 支持的版本
+     * 支持版本
      */
     @Override
     public SourceVersion getSupportedSourceVersion() {
@@ -56,27 +52,40 @@ public class AnnotationProcessor extends AbstractProcessor {
         return types;
     }
 
+    /**
+     * 初始化
+     */
+    @Override
+    public synchronized void init(ProcessingEnvironment processingEnvironment) {
+        super.init(processingEnvironment);
+        filer = processingEnvironment.getFiler();
+    }
+
+
+    /**
+     * 通过注解处理器处理注解，生成版本代码到build文件夹中
+     */
     @Override
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnvironment) {
-        //获取使用了BindView注解的对象
+        //获取App中使用了BindView注解的对象
         Set<? extends Element> elementsAnnotatedWith = roundEnvironment.getElementsAnnotatedWith(BindView.class);
 
+        //开始对elementsAnnotatedWith进行分类
         Map<String, List<VariableElement>> map = new HashMap<>();
         for (Element element : elementsAnnotatedWith) {
             //获取所注解的变量元素
             VariableElement variableElement = (VariableElement) element;
             //通过变量元素获取所处的外部类（例如MainActivity中的TextView，TextView就是变量元素，MainActivity就是外部类）
-            String outerClass = variableElement.getEnclosingElement().getSimpleName().toString();
-            //获取map中的变量元素列表，如果为空则new一个，再添加进入map集合。
-            List<VariableElement> variableElementList = map.get(outerClass);
-            if (variableElementList == null) {
-                variableElementList = new ArrayList<>();
-                map.put(outerClass, variableElementList);
+            String activityName = variableElement.getEnclosingElement().getSimpleName().toString();
+            //获取map集合中的变量元素列表，如果为空则new一个，再添加进入map集合。
+            List<VariableElement> variableElements = map.get(activityName);
+            if (variableElements == null) {
+                variableElements = new ArrayList<>();
+                map.put(activityName, variableElements);
             }
             //添加到变量元素列表中
-            variableElementList.add(variableElement);
+            variableElements.add(variableElement);
         }
-
         //生成文件
         if (map.size() > 0) {
             //创建输入流
@@ -86,28 +95,33 @@ public class AnnotationProcessor extends AbstractProcessor {
             //如果iterator.hasNext()为true，执行循环体中的代码
             while (iterator.hasNext()) {
                 //获取map的键 （键：外部类名称）
-                String outerClass = iterator.next();
+                String activityName = iterator.next();
                 //通过键获取到值 （值：变量元素列表）
-                List<VariableElement> variableElements = map.get(outerClass);
+                List<VariableElement> variableElements = map.get(activityName);
                 //获取变量元素所处的外部类，这里强转一下
                 TypeElement enclosingElement = (TypeElement) variableElements.get(0).getEnclosingElement();
-                //获取包名（通过AbstractProcessor的成员变量processingEnv获取ElementUtils工具类，再通过外部类获取所处的包的名字）
+                //得到包名
                 String packageName = processingEnv.getElementUtils().getPackageOf(enclosingElement).toString();
                 //准备写文件，要处理异常
                 try {
-                    //定义文件名 （包名 + 类名）
-                    String fileName = packageName + "." + outerClass + "_ViewBinding";
                     //创建源文件
-                    JavaFileObject sourceFile = mFiler.createSourceFile(fileName);
+                    JavaFileObject sourceFile = filer.createSourceFile(packageName + "." + activityName + "_ViewBinding");
                     //打开文件输入流并赋值给writer
                     writer = sourceFile.openWriter();
-                    //开始写文件，第一行包名
+                    //写入包名（例如：package com.llw.annotation;）
                     writer.write("package " + packageName + ";\n");
+                    //写入导包IBinder（例如：import com.llw.annotation.IBinder;）
                     writer.write("import " + packageName + ".IBinder;\n");
-                    writer.write("public class " + outerClass + "_ViewBinding implements IBinder<" +
-                            packageName + "." + outerClass + ">{\n");
-                    writer.write("    @Override\n" +
-                            "    public void bind(" + packageName + "." + outerClass + " target){");
+                    //换行
+                    writer.write("\n");
+                    //写入类实现IBinder接口（例如：public class MainActivity_ViewBinding implements
+                    // IBinder<com.llw.annotation.MainActivity>{）
+                    writer.write("public class " + activityName + "_ViewBinding implements IBinder<" +
+                            packageName + "." + activityName + "> {\n");
+                    //写入@Override注解，注意格式（例如：@Override）
+                    writer.write("\n    @Override");
+                    //写入bind方法（例如：public void bind(com.llw.annotation.MainActivity target) {）
+                    writer.write("\n    public void bind(" + packageName + "." + activityName + " target) {\n");
                     //遍历类中每一个需要findViewById的控件
                     for (VariableElement variableElement : variableElements) {
                         //获取控件名称
@@ -116,17 +130,17 @@ public class AnnotationProcessor extends AbstractProcessor {
                         int id = variableElement.getAnnotation(BindView.class).value();
                         //获取控件类型
                         TypeMirror typeMirror = variableElement.asType();
-                        //写findViewById语句
-                        writer.write("        target." + variableName +
-                                " = (" + typeMirror + ") target.findViewById(" + id + ");\n");
+                        //写findViewById语句（例如：target.tvText = (android.widget.TextView) target.findViewById(2131231127);）
+                        writer.write("        target." + variableName + " = (" + typeMirror + ") target.findViewById(" + id + ");");
                     }
-                    writer.write("        }\n");
-                    writer.write("    }\n");
-                } catch (IOException e) {
+                    //换行 结束
+                    writer.write("\n    }\n}");
+
+                } catch (Exception e) {
                     e.printStackTrace();
                 } finally {
                     if (writer != null) {
-                        try{
+                        try {
                             writer.close();
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -136,6 +150,19 @@ public class AnnotationProcessor extends AbstractProcessor {
             }
         }
 
+
         return false;
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
