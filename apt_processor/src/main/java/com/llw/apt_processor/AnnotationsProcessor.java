@@ -2,6 +2,13 @@ package com.llw.apt_processor;
 
 import com.google.auto.service.AutoService;
 import com.llw.apt_annotation.BindView;
+import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.ParameterizedTypeName;
+import com.squareup.javapoet.TypeName;
+import com.squareup.javapoet.TypeSpec;
+import com.squareup.javapoet.TypeVariableName;
 
 import java.io.Writer;
 import java.util.ArrayList;
@@ -19,6 +26,7 @@ import javax.annotation.processing.Processor;
 import javax.annotation.processing.RoundEnvironment;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
+import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeMirror;
@@ -86,6 +94,70 @@ public class AnnotationsProcessor extends AbstractProcessor {
             //添加到变量元素列表中
             variableElements.add(variableElement);
         }
+
+        //makefile(map);
+        makefilePlus(map);
+        return false;
+    }
+
+    /**
+     * 通过javapoet方式生成编译时类
+     */
+    private void makefilePlus(Map<String, List<VariableElement>> map) {
+        if (map.size() > 0) {
+            for (String activityName : map.keySet()) {
+                //通过键获取到值 （值：变量元素列表）
+                List<VariableElement> variableElements = map.get(activityName);
+                //获取变量元素所处的外部类，这里强转一下
+                TypeElement enclosingElement = (TypeElement) variableElements.get(0).getEnclosingElement();
+                //得到包名
+                String packageName = processingEnv.getElementUtils().getPackageOf(enclosingElement).toString();
+                //获取类名实例方式一
+                ClassName iBinderName = ClassName.get(packageName, "IBinder");
+                //获取类名实例方式二
+                ClassName activityClassName = ClassName.bestGuess(activityName);
+                //创建类构造器，例如MainActivity_ViewBinding
+                TypeSpec.Builder classBuilder = TypeSpec.classBuilder(activityName + "_ViewBinding")
+                        //添加修饰符 public
+                        .addModifiers(Modifier.PUBLIC)
+                        //添加实现接口，例如 implements IBinder<MainActivity>
+                        .addSuperinterface(ParameterizedTypeName.get(iBinderName, activityClassName));
+                //创建方法构造器 方法名bind()
+                MethodSpec.Builder methodBuilder = MethodSpec.methodBuilder("bind")
+                        //添加注解
+                        .addAnnotation(Override.class)
+                        //添加修饰符
+                        .addModifiers(Modifier.FINAL, Modifier.PUBLIC)
+                        //添加方法参数
+                        .addParameter(activityClassName, "target");
+
+                for (VariableElement variableElement : variableElements) {
+                    //获取控件名称
+                    String variableName = variableElement.getSimpleName().toString();
+                    //通过注解拿到控件的Id
+                    int id = variableElement.getAnnotation(BindView.class).value();
+                    //在方法中添加代码，写findViewById语句（例如：target.tvText = target.findViewById(2131231127);）
+                    //$L代表的是字面量，variableName对应第一个L，i对应第二个L
+                    methodBuilder.addStatement("target.$L = target.findViewById($L)", variableName, id);
+                }
+                //添加方法
+                classBuilder.addMethod(methodBuilder.build());
+                try {
+                    //写入文件
+                    JavaFile.builder(packageName, classBuilder.build())
+                            .build()
+                            .writeTo(filer);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    /**
+     * 通过手动拼写的方式生成编译时类
+     */
+    private void makefile(Map<String, List<VariableElement>> map) {
         //生成文件
         if (map.size() > 0) {
             //创建输入流
@@ -116,8 +188,7 @@ public class AnnotationsProcessor extends AbstractProcessor {
                     writer.write("\n");
                     //写入类实现IBinder接口（例如：public class MainActivity_ViewBinding implements
                     // IBinder<com.llw.annotation.MainActivity>{）
-                    writer.write("public class " + activityName + "_ViewBinding implements IBinder<" +
-                            packageName + "." + activityName + "> {\n");
+                    writer.write("public class " + activityName + "_ViewBinding implements IBinder<" + packageName + "." + activityName + "> {\n");
                     //写入@Override注解，注意格式（例如：@Override）
                     writer.write("\n    @Override");
                     //写入bind方法（例如：public void bind(com.llw.annotation.MainActivity target) {）
@@ -149,9 +220,6 @@ public class AnnotationsProcessor extends AbstractProcessor {
                 }
             }
         }
-
-
-        return false;
     }
 }
 

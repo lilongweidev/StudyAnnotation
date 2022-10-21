@@ -23,6 +23,7 @@
     <bytecodeTargetLevel target="1.7">
       <module name="StudyAnnotation.annotation" target="11" />
       <module name="StudyAnnotation.app" target="11" />
+      <module name="StudyAnnotation.apt_lib" target="11" />
       <module name="StudyAnnotation.processor" target="11" />
     </bytecodeTargetLevel>
   </component>
